@@ -226,26 +226,60 @@ div.tocify {
 <p>Prepare phyloseq object</p>
 <div id="load-packages" class="section level2">
 <h2>Load packages</h2>
-<pre class="r"><code>source('http://bioconductor.org/biocLite.R')</code></pre>
-<pre><code>## Bioconductor version 3.6 (BiocInstaller 1.28.0), ?biocLite for help</code></pre>
-<pre class="r"><code>biocLite('phyloseq', type = &quot;source&quot;)</code></pre>
-<pre><code>## BioC_mirror: https://bioconductor.org</code></pre>
-<pre><code>## Using Bioconductor 3.6 (BiocInstaller 1.28.0), R 3.4.4 (2018-03-15).</code></pre>
-<pre><code>## Installing package(s) 'phyloseq'</code></pre>
-<pre><code>## installation path not writeable, unable to update packages: boot, class,
-##   cluster, codetools, foreign, KernSmooth, lattice, MASS, Matrix, mgcv,
-##   nlme, nnet, rpart, spatial, survival</code></pre>
+<pre class="r"><code>library(phyloseq)
+library(tidyverse)</code></pre>
 </div>
 <div id="read-in-the-data" class="section level2">
 <h2>Read in the data</h2>
 <p>use <code>readRDS</code> to load phyloseq object</p>
 <pre class="r"><code>inc.raw &lt;- readRDS(&quot;Data/incubation_raw.RDS&quot;)
 inc.raw</code></pre>
-<pre><code>## Loading required package: phyloseq</code></pre>
 <pre><code>## phyloseq-class experiment-level object
 ## otu_table()   OTU Table:         [ 43726 taxa and 350 samples ]
 ## sample_data() Sample Data:       [ 350 samples by 13 sample variables ]
 ## tax_table()   Taxonomy Table:    [ 43726 taxa by 6 taxonomic ranks ]</code></pre>
+</div>
+<div id="functions" class="section level2">
+<h2>Functions</h2>
+<pre class="r"><code># Put phyloseq object into a df with .02% phylum (glomed at phylum level)
+RelativeAbundanceDf &lt;- function(physeq) {
+    physeq %&gt;% tax_glom(taxrank = &quot;Phylum&quot;) %&gt;% transform_sample_counts(function(x) {
+        x/sum(x)
+    }) %&gt;% psmelt() %&gt;% filter(Abundance &gt; 0.02) %&gt;% arrange(Phylum)
+}
+
+# Function to plot relative abundance
+PlotRelativeAbundance &lt;- function(df) {
+    ggplot(df, aes(x = as.factor(day), y = Abundance, fill = Phylum)) + 
+    facet_grid(treatment ~ .) + 
+    geom_bar(stat = &quot;identity&quot;) +
+    #scale_fill_manual(values = phylum.colors) + 
+        # Remove x axis title
+    theme(axis.title.x = element_blank()) + 
+    guides(fill = guide_legend(reverse = TRUE, keywidth = 1, keyheight = 1)) + 
+    ylab(&quot;Relative Abundance (Phyla &gt; 2%) \n&quot;) +
+    ggtitle(&quot;Phylum Composition of Incubation Soils \n Bacterial Communities by Treatment&quot;)
+}
+
+#Scale reads function to be used prior to ordination
+ScaleReads &lt;- function(physeq, n) {
+  physeq.scale &lt;- transform_sample_counts(physeq, function(x) {
+    (n * x/sum(x))
+  })
+  otu_table(physeq.scale) &lt;- floor(otu_table(physeq.scale))
+  physeq.scale &lt;- prune_taxa(taxa_sums(physeq.scale) &gt; 0, physeq.scale)
+  return(physeq.scale)
+}
+
+# Function to summarise a data frame and give statistics
+DataSummary &lt;- function(data, varname, groupnames) {
+  require(plyr)
+  SummaryFunc &lt;- function(x, col) {
+    c(mean = mean(x[[col]], na.rm = TRUE), sd = sd(x[[col]], na.rm = TRUE))
+  }
+  data.sum &lt;- ddply(data, groupnames, .fun = SummaryFunc, varname)
+  data.sum &lt;- rename(data.sum, c(mean = varname))
+}</code></pre>
 </div>
 </div>
 

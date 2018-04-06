@@ -10,11 +10,7 @@ Incubation
 
 Masters experiment, incubation of soils amended with various amendments
 
-Repository of walkthroughs for exploring 16s gene abundance data from soils
-
-Prepare phyloseq object
-
-## Load packages
+## Load libraries
 
 ```{r, cache=TRUE, warning=FALSE, message=FALSE}
 library(phyloseq)
@@ -28,7 +24,53 @@ inc.raw <- readRDS("Data/incubation_raw.RDS")
 inc.raw
 ```
 
-```{r}
+#### Functions
 
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+
+# Put phyloseq object into a df with .02% phylum (glomed at phylum level)
+RelativeAbundanceDf <- function(physeq) {
+    physeq %>% tax_glom(taxrank = "Phylum") %>% transform_sample_counts(function(x) {
+        x/sum(x)
+    }) %>% psmelt() %>% filter(Abundance > 0.02) %>% arrange(Phylum)
+}
+
+# Function to plot relative abundance
+PlotRelativeAbundance <- function(df) {
+    ggplot(df, aes(x = as.factor(day), y = Abundance, fill = Phylum)) + 
+    facet_grid(treatment ~ .) + 
+    geom_bar(stat = "identity") +
+    #scale_fill_manual(values = phylum.colors) + 
+        # Remove x axis title
+    theme(axis.title.x = element_blank()) + 
+    guides(fill = guide_legend(reverse = TRUE, keywidth = 1, keyheight = 1)) + 
+    ylab("Relative Abundance (Phyla > 2%) \n") +
+    ggtitle("Phylum Composition of Incubation Soils \n Bacterial Communities by Treatment")
+}
+
+#Scale reads function to be used prior to ordination
+ScaleReads <- function(physeq, n) {
+  physeq.scale <- transform_sample_counts(physeq, function(x) {
+    (n * x/sum(x))
+  })
+  otu_table(physeq.scale) <- floor(otu_table(physeq.scale))
+  physeq.scale <- prune_taxa(taxa_sums(physeq.scale) > 0, physeq.scale)
+  return(physeq.scale)
+}
+
+# Function to summarise a data frame and give statistics
+DataSummary <- function(data, varname, groupnames) {
+  require(plyr)
+  SummaryFunc <- function(x, col) {
+    c(mean = mean(x[[col]], na.rm = TRUE), sd = sd(x[[col]], na.rm = TRUE))
+  }
+  data.sum <- ddply(data, groupnames, .fun = SummaryFunc, varname)
+  data.sum <- rename(data.sum, c(mean = varname))
+}
+```
+
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+inc.raw.phylum.2percent <- RelativeAbundanceDf(inc.raw)
 ```
 
