@@ -1,8 +1,10 @@
 ---
 output:
+  pdf_document:
+    toc: yes
   html_document:
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
 ---
 
 Incubation
@@ -15,6 +17,8 @@ Masters experiment, incubation of soils amended with various amendments
 ```{r, cache=TRUE, warning=FALSE, message=FALSE}
 library(phyloseq)
 library(tidyverse)
+library(vegan)
+library(ggpubr)
 ```
 
 ## Read in the data 
@@ -24,7 +28,7 @@ inc.raw <- readRDS("Data/incubation_raw.RDS")
 inc.raw
 ```
 
-#### Functions
+## Functions
 
 ```{r, cache=TRUE, warning=FALSE, message=FALSE}
 
@@ -69,8 +73,364 @@ DataSummary <- function(data, varname, groupnames) {
 }
 ```
 
-
-```{r, cache=TRUE, warning=FALSE, message=FALSE}
+Use function from above to create df with .02% of the phylum level of OTUs
+```{r, cache=TRUE, warning=FALSE, message=FALSE, error=FALSE}
 inc.raw.phylum.2percent <- RelativeAbundanceDf(inc.raw)
+
+# Plot and save image
+inc.phylum.abundance <- PlotRelativeAbundance(inc.raw.phylum.2percent)
+tiff('Images/inc.phylum.abundance.tiff', units="in", width=5, height=5, res=300)
+inc.phylum.abundance
+dev.off()
+inc.phylum.abundance
 ```
+
+Some data wrangling to make the plots look nicer
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+# First split into two phyloseq objects
+# Incubation
+inc.treatment <- subset_samples(inc.raw, day %in% c("0", "7", "14", "21", "35", "49", "97"))
+# Amends
+inc.amend <- subset_samples(inc.raw, treatment %in% c("AlfalfaAmend", "CompostAmend"))
+
+# Now let's pool the reps so that y-axis goes to 1, need to do for each object
+inc.merged <- inc.treatment
+variable.1 <- as.character(get_variable(inc.merged, "treatment"))
+variable.2 <- as.character(get_variable(inc.merged, "day"))
+sample_data(inc.merged)$TreatmentAndDay <- mapply(paste0, variable.1, variable.2, collapse = "-")
+inc.merged <- merge_samples(inc.merged, "TreatmentAndDay")
+sample_data(inc.merged)$treatment <- levels(sample_data(inc.treatment)$treatment)
+```
+
+## Relative abundance of phyla
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+# Innie to outtie, make df and plot relative abumndace
+treatments.abundance <- PlotRelativeAbundance(RelativeAbundanceDf(inc.treatment))
+amendments.abundance <- PlotRelativeAbundance(RelativeAbundanceDf(inc.amend))
+mergeddf.abundance <- PlotRelativeAbundance(RelativeAbundanceDf(inc.merged))
+
+# Save as images, high quality
+tiff('Images/treatments.abundance.tiff', units="in", width=5, height=5, res=300)
+treatments.abundance
+dev.off()
+tiff('Images/amendments.abundance.tiff', units="in", width=5, height=5, res=300)
+amendments.abundance
+dev.off()
+tiff('Images/mergeddf.abundance.tiff', units="in", width=5, height=5, res=300)
+mergeddf.abundance
+dev.off()
+treatments.abundance
+amendments.abundance
+mergeddf.abundance
+```
+
+## PCoA
+We already have the function `ScaleReads` to re-sample our data to a specific read number per sample. 
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+# Now call the function with the phyloseq object you wish to scale
+inc.scale.treatment <- ScaleReads(inc.treatment, n = 6000)
+```
+Fix day levels in `sample_data`
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+sample_data(inc.scale.treatment)$day <- factor(sample_data(inc.scale.treatment)$day, 
+  levels = c("0", "7", "14", "21", "35", "49", "97"))
+```
+Now use the `ordinate` function from phyloseq
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.ordination.treatment <- ordinate(physeq = inc.scale.treatment, method = "PCoA", distance = "bray")
+```
+Use `plot_ordination` to create the plot then manipulate it with ggplot2
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.ordination.plot.treatment <- plot_ordination(physeq = inc.scale.treatment, ordination = inc.ordination.treatment, 
+  color = "day", shape = "treatment", title = "PCoa of Incubation Bacterial Communities") + 
+  #scale_color_manual(values = phylum.colors) + 
+  geom_point(aes(color = day), alpha = 0.7, size = 4) + 
+  geom_point(color = "grey90", size = 1.5)  
+
+tiff('Images/inc.ordination.plot.treatment.tiff', units="in", width=10, height=10, res=300)
+inc.ordination.plot.treatment
+dev.off()
+
+inc.ordination.plot.treatment
+```
+
+## Statistics
+Interesting results shown so far, we can see that the communities are changing over time and in response to nutrients
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+# Stats
+# Adonis
+inc.scale.df <- as(sample_data(inc.scale.treatment), "data.frame")
+inc.distance <- distance(inc.scale.treatment, "bray")
+inc.adonis <- adonis(inc.distance ~ treatment + day, inc.scale.df)
+inc.adonis
+# I'm pretty sure the order you feed the categories
+incadonis.reverse <- (adonis(inc.distance ~ day + treatment, inc.scale.df))
+```
+
+## Soil chemical measurements
+Plot the other data, mainly we want to explore how the nutrient concentration and microbial biomass numbers are changing during the course of the incubation.
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.treatment
+sample_data(inc.treatment)$day <- as.factor(sample_data(inc.treatment)$day)
+inc.data <- as.data.frame(sample_data(inc.treatment))
+colnames(inc.data)
+```
+
+## Nitrate "NO3"
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.nitrate.eb <- DataSummary(inc.data, varname = "NO3", groupnames = c("day", "treatment"))
+inc.nitrate.eb
+
+plot.inc.nitrate.eb <- ggplot(inc.nitrate.eb, aes(x = day, y = NO3, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = NO3 - sd, ymax = NO3 + sd), width = 1, position = position_dodge(0.05)) +
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of NO3 by day", x = "Day", y = "NO3") + 
+  theme_classic()
+tiff('Images/nitrate.eb.tiff', units="in", width=5, height=5, res=300)
+plot.inc.nitrate.eb
+dev.off()
+
+inc.nitrate <- ggplot(inc.data, aes(x = day, y = NO3, group = treatment)) + 
+  geom_point(aes(color = treatment))
+tiff('Images/nitrate.tiff', units="in", width=5, height=5, res=300)
+inc.nitrate
+dev.off()
+
+plot <- ggplot(inc.data, aes(x = treatment, y = NO3, color = treatment)) +
+  facet_grid(~day) +
+  geom_boxplot(position = "dodge") +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank())
+tiff("Images/boxplot.nitrate.tiff", units = "in", width = 5, height = 5, res = 300)
+plot
+dev.off()
+
+inc.data.7 <- inc.data %>%
+  filter(day == 7) %>%
+  ggplot(aes(x = treatment, y = NO3, color = treatment)) +
+  geom_boxplot() +
+  #facet_grid( ~ day) +
+  rotate_x_text(angle = 45) +
+  geom_hline(yintercept = mean(inc.data$NO3), color = "red") +
+  stat_compare_means(method = "anova") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = ".all.")
+tiff("Images/nitrate.day.7.boxplot.tiff", units = "in", width = 5, height = 5, res = 300)
+inc.data.7
+dev.off()
+
+test <- inc.data %>%
+  filter(day == 7)
+
+stat.day.7 <- ggboxplot(test, x = "treatment", y = "NO3", color = "treatment", legend = "none") +
+  rotate_x_text(angle = 45) +
+  geom_hline(yintercept = mean(test$NO3)) +
+  stat_compare_means(method = "anova") +
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = ".all.")
+tiff('Images/stat.day.7.tiff', units="in", width=5, height=5, res=300)
+#insert ggplot code
+stat.day.7
+dev.off()
+plot.inc.nitrate.eb
+inc.nitrate
+plot
+inc.data.7
+stat.day.7
+```
+
+## Amonia "NH3" 
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.amonia.eb <- DataSummary(inc.data, varname = "NH3", groupnames = c("day", "treatment"))
+
+plot.inc.amonia.eb <- ggplot(inc.amonia.eb, aes(x = day, y = NH3, group = treatment, color = treatment)) +
+  geom_errorbar(aes(ymin = NH3 - sd, ymax = NH3 + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + labs(title = "Plot of NH3 by day", x = "Day", y = "NH3") + 
+  theme_classic()
+plot.inc.amonia.eb
+
+inc.amonia <- ggplot(inc.data, aes(x = day, y = NH3, group = treatment)) + geom_point(aes(color = treatment))
+inc.amonia
+tiff('Images/inc.amonia.tiff', units="in", width=5, height=5, res=300)
+#insert ggplot code
+inc.amonia
+dev.off()
+tiff('Images/plot.inc.amonia.eb.tiff', units="in", width=5, height=5, res=300)
+#insert ggplot code
+plot.inc.amonia.eb
+dev.off()
+```
+
+## Microbial Biomass 
+
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.micr.biomass.c.eb <- DataSummary(inc.data, varname = "MBC_mg.kg_per_dry_wt_soil", groupnames = c("day", "treatment"))
+
+plot.inc.micr.biomass.c.eb <- ggplot(inc.micr.biomass.c.eb, aes(x = day, y = MBC_mg.kg_per_dry_wt_soil, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = MBC_mg.kg_per_dry_wt_soil - sd, ymax = MBC_mg.kg_per_dry_wt_soil + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of MBC by day", x = "Day", y = "MBC") + 
+  theme_classic()
+plot.inc.micr.biomass.c.eb
+
+inc.micr.biomass.c <- ggplot(inc.data, aes(x = day, y = MBC_mg.kg_per_dry_wt_soil, group = treatment)) + geom_point(aes(color = treatment))
+inc.micr.biomass.c
+tiff('Images/plot.inc.micr.biomass.c.eb.tiff', units="in", width=5, height=5, res=300)
+plot.inc.micr.biomass.c.eb
+dev.off()
+tiff('Images/inc.micr.biomass.c.tiff', units="in", width=5, height=5, res=300)
+inc.micr.biomass.c
+dev.off()
+```
+## pH
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.pH.eb <- DataSummary(inc.data, varname = "pH", groupnames = c("day", "treatment"))
+
+plot.inc.pH.eb <- ggplot(inc.pH.eb, aes(x = day, y = pH, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = pH - sd, ymax = pH + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of pH by day", x = "Day", y = "MBC") + 
+  theme_classic()
+plot.inc.pH.eb
+
+tiff('Images/plot.inc.pH.eb.tiff', units="in", width=5, height=5, res=300)
+plot.inc.pH.eb
+dev.off()
+
+inc.pH <- ggplot(inc.data, aes(x = day, y = pH, group = treatment)) + geom_point(aes(color = treatment))
+inc.pH
+
+tiff('Images/inc.pH.tiff', units="in", width=5, height=5, res=300)
+inc.pH
+dev.off()
+```
+## Total Nitrogen via combustion analysis
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.N_flash.eb <- DataSummary(inc.data, varname = "N_flash", groupnames = c("day", "treatment"))
+
+plot.inc.N_flash.eb <- ggplot(inc.N_flash.eb, aes(x = day, y = N_flash, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = N_flash - sd, ymax = N_flash + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of N_flash by day", x = "Day", y = "% N") + 
+  theme_classic()
+plot.inc.N_flash.eb
+
+tiff('Images/plot.inc.N_flash.eb.tiff', units="in", width=5, height=5, res=300)
+plot.inc.N_flash.eb
+dev.off()
+
+inc.N_flash <- ggplot(inc.data, aes(x = day, y = N_flash, group = treatment)) + geom_point(aes(color = treatment))
+inc.N_flash
+
+tiff('Images/inc.N_flash.tiff', units="in", width=5, height=5, res=300)
+inc.N_flash
+dev.off()
+```
+## Total Carbon via combustion analysis
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.C_flash.eb <- DataSummary(inc.data, varname = "C_flash", groupnames = c("day", "treatment"))
+
+plot.inc.C_flash.eb <- ggplot(inc.C_flash.eb, aes(x = day, y = C_flash, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = C_flash - sd, ymax = C_flash + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of C_flash by day", x = "Day", y = "% C") + 
+  theme_classic()
+plot.inc.C_flash.eb
+
+tiff('Images/inc.C_flash.tiff', units="in", width=5, height=5, res=300)
+plot.inc.C_flash.eb
+dev.off()
+
+inc.C_flash <- ggplot(inc.data, aes(x = day, y = C_flash, group = treatment)) + geom_point(aes(color = treatment))
+inc.C_flash
+
+tiff('Images/inc.C_flash.tiff', units="in", width=5, height=5, res=300)
+inc.C_flash
+dev.off()
+```
+## Gravimetric moisture content
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.gravimetric_water_content.eb <- DataSummary(inc.data, varname = "gravimetric_water_content", groupnames = c("day", "treatment"))
+
+plot.inc.gravimetric_water_content.eb <- ggplot(inc.gravimetric_water_content.eb, aes(x = day, y = gravimetric_water_content, group = treatment, color = treatment)) + 
+  geom_errorbar(aes(ymin = gravimetric_water_content - sd, ymax = gravimetric_water_content + sd), width = 1, position = position_dodge(0.05)) + 
+  geom_line(aes(linetype = treatment)) + 
+  geom_point(aes(shape = treatment)) + 
+  labs(title = "Plot of gravimetric_water_content by day", x = "Day", y = "gravimetric_water_content") + 
+  theme_classic()
+plot.inc.gravimetric_water_content.eb
+
+tiff('Images/plot.inc.gravimetric_water_content.eb.tiff', units="in", width=5, height=5, res=300)
+plot.inc.gravimetric_water_content.eb
+dev.off()
+
+inc.gravimetric_water_content <- ggplot(inc.data, aes(x = day, y = gravimetric_water_content, group = treatment)) + geom_point(aes(color = treatment))
+inc.gravimetric_water_content
+
+tiff('Images/inc.gravimetric_water_content.tiff', units="in", width=5, height=5, res=300)
+inc.gravimetric_water_content
+dev.off()
+```
+
+## Under Construction
+Try tax_glom to identify the OTUs on one group but not another
+
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.raw.control <- subset_samples(inc.raw, treatment == "Control" & day == "0")
+inc.raw.alfalfa <- subset_samples(inc.raw, treatment == "Alfalfa" & day == "0")
+# Day zero comparison of control and alfalfa OTUs
+control.no.0 <- filter_taxa(inc.raw.control, function(x) sum(x) >0, TRUE)
+alfalfa.no.0 <- filter_taxa(inc.raw.alfalfa, function(x) sum(x) >0, TRUE)
+control.taxa <- rownames(tax_table(control.no.0))
+alfalfa.taxa <- rownames(tax_table(alfalfa.no.0))
+length(intersect(control.taxa, alfalfa.taxa))
+# OTUs in alfalfa day 0 only 
+only.alfalfa <- setdiff(alfalfa.taxa, control.taxa)
+length(only.alfalfa)
+tax.in.alf <- tax_table(inc.raw.alfalfa)[only.alfalfa]
+# Below melt for plotting and prune to get taxa from larger phyloseq object
+#only.alfalfa.day.0 <- prune_taxa(only.alfalfa, inc.raw.alfalfa)
+#only.alfalfa.day.0.df <- psmelt(only.alfalfa.day.0)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
