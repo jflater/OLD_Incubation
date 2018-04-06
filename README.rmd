@@ -1,10 +1,10 @@
 ---
 output:
-  pdf_document:
-    toc: yes
   html_document:
     toc: yes
     toc_float: yes
+  pdf_document:
+    toc: yes
 ---
 
 Incubation
@@ -152,6 +152,26 @@ inc.ordination.plot.treatment
 dev.off()
 
 inc.ordination.plot.treatment
+```
+
+## Alpha Diversity
+First remove OTUs that sum to 0
+```{r cache=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+inc.treatment.pruned <- prune_species(speciesSums(inc.treatment) > 0, inc.treatment)
+richness.data <- plot_richness(inc.treatment.pruned, measures = "Shannon")
+richness.df <- richness.data$data
+
+scaled.richness.data <- plot_richness(inc.scale.treatment, measures = "Shannon")
+scaled.df <- scaled.richness.data$data
+
+richness.shannon <- ggplot(richness.df, aes(x = day, y = value), color = treatment) +
+  geom_boxplot(aes(color = treatment), position = "dodge") +
+  facet_grid(~treatment)
+richness.shannon
+scaled.richness.shannon <- ggplot(scaled.df, aes(x = day, y = value), color = treatment) +
+  geom_boxplot(aes(color = treatment), position = "dodge") +
+  facet_grid(~treatment)
+scaled.richness.shannon
 ```
 
 ## Statistics
